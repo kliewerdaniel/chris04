@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import time
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -56,10 +57,10 @@ def upsert_memory(key: str, value: str):
     non_core_keys = [k for k in memories.keys() if k not in core_keys]
     
     if len(memories) > 100:
-        non_core_keys.sort()
-        keys_to_delete = non_core_keys[:len(memories) - 100]
-        for k in keys_to_delete:
-            del memories[k]
+        for k in list(memories.keys()):
+            if k not in core_keys:
+                del memories[k]
+                break
     
     save_memories(memories)
 
@@ -82,7 +83,7 @@ def clear_memories():
 
 
 def format_for_prompt(max_chars: int = 800) -> str:
-    """Format memories as '- KEY: value' lines, trimmed to max_chars from the bottom."""
+    """Format memories as '- KEY: value' lines, trimmed to max_chars keeping most recent."""
     memories = load_memories()
     if not memories:
         return ""
@@ -93,18 +94,17 @@ def format_for_prompt(max_chars: int = 800) -> str:
     if len(text) <= max_chars:
         return text
     
-    lines = text.split('\n')
     result_lines = []
     current_length = 0
     
-    for line in lines:
-        line_length = len(line) + (1 if result_lines else 0)
-        if current_length + line_length > max_chars:
+    for line in reversed(lines):
+        needed = len(line) + (1 if result_lines else 0)
+        if current_length + needed > max_chars:
             break
         result_lines.append(line)
-        current_length += line_length
+        current_length += needed
     
-    return '\n'.join(result_lines)
+    return "\n".join(reversed(result_lines))
 
 
 def extract_and_save(user_msg: str, assistant_msg: str):
@@ -124,6 +124,7 @@ def extract_and_save(user_msg: str, assistant_msg: str):
         
         for line in response.split('\n'):
             line = line.strip()
+            line = re.sub(r'^[\-\*•\d\.]+\s*', '', line).strip()
             if ':' in line:
                 key, value = line.split(':', 1)
                 key = key.strip()

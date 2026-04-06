@@ -29,9 +29,6 @@ def call_llm(prompt: str, max_tokens: int = 512, temperature: float = 0.7) -> Op
         response.raise_for_status()
         result = response.json()
         content = result.get("content", "")
-        # Clean up any leaked instruction text
-        for leak in ["Your reply must contain ONLY", "---", "<end_of_turn>", "<start_of_turn>"]:
-            content = content.split(leak)[0]
         return content.strip()
     except Exception:
         return None
@@ -39,43 +36,33 @@ def call_llm(prompt: str, max_tokens: int = 512, temperature: float = 0.7) -> Op
 
 def build_prompt(system: str, memories: str, summary: Optional[str], recent: List[Dict], user_message: str) -> str:
     """Assemble tiered prompt with token budget enforcement using Gemma 4 chat format."""
-    # Build system context (persona + rules + memories + summary)
     context_parts = [system]
     if memories:
-        context_parts.append("--- MEMORY ---")
-        context_parts.append(memories)
+        context_parts.append("--- MEMORY ---\n" + memories)
     if summary:
-        context_parts.append("--- EARLIER CONTEXT ---")
-        context_parts.append(summary)
-    context_text = "\n".join(context_parts)
+        context_parts.append("--- EARLIER CONTEXT ---\n" + summary)
+    system_block = "\n\n".join(context_parts)
 
-    # Build conversation history in Gemma format
-    turns = []
+    turns = [f"<start_of_turn>user\n{system_block}<end_of_turn>\n<start_of_turn>model\nUnderstood.<end_of_turn>"]
+
     for msg in recent:
-        role = msg["role"]
-        content = msg["content"]
-        if role == "user":
-            turns.append(f"<start_of_turn>user\n{content}<end_of_turn>")
-        elif role == "assistant":
-            turns.append(f"<start_of_turn>model\n{content}<end_of_turn>")
+        role = "user" if msg["role"] == "user" else "model"
+        turns.append(f"<start_of_turn>{role}\n{msg['content']}<end_of_turn>")
 
-    # Current turn: combine context + conversation + user message
-    conversation_block = "\n".join(turns)
-    if conversation_block:
-        conversation_block = f"\n\n--- CONVERSATION ---\n{conversation_block}"
-    
-    user_content = f"{context_text}{conversation_block}\n\nUser: {user_message}"
-    
-    prompt = f"<start_of_turn>user\n{user_content}<end_of_turn>\n<start_of_turn>model\n"
+    turns.append(f"<start_of_turn>user\n{user_message}<end_of_turn>")
+    turns.append("<start_of_turn>model\n")
 
-    # Enforce token budget: if over MAX_TOKENS, drop oldest turns
-    while count_tokens(prompt) > MAX_TOKENS and len(turns) > 2:
-        turns.pop(0)
-        conversation_block = "\n".join(turns)
-        if conversation_block:
-            conversation_block = f"\n\n--- CONVERSATION ---\n{conversation_block}"
-        user_content = f"{context_text}{conversation_block}\n\nUser: {user_message}"
-        prompt = f"<start_of_turn>user\n{user_content}<end_of_turn>\n<start_of_turn>model\n"
+    prompt = "\n".join(turns)
+
+    while count_tokens(prompt) > MAX_TOKENS and len(recent) > 2:
+        recent = recent[1:]
+        turns = [f"<start_of_turn>user\n{system_block}<end_of_turn>\n<start_of_turn>model\nUnderstood.<end_of_turn>"]
+        for msg in recent:
+            role = "user" if msg["role"] == "user" else "model"
+            turns.append(f"<start_of_turn>{role}\n{msg['content']}<end_of_turn>")
+        turns.append(f"<start_of_turn>user\n{user_message}<end_of_turn>")
+        turns.append("<start_of_turn>model\n")
+        prompt = "\n".join(turns)
 
     return prompt
 

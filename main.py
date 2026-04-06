@@ -2,6 +2,7 @@ import asyncio
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Optional
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
@@ -80,7 +81,7 @@ async def chat_endpoint(request: ChatRequest):
     save_message("user", user_message)
     
     memories_str = format_for_prompt()
-    recent_messages = get_messages(n=20)
+    recent_messages = get_messages(n=21)[:-1]
     
     prompt = build_prompt(
         system=system_prompt,
@@ -119,28 +120,17 @@ async def chat_endpoint(request: ChatRequest):
         )
         context_info = get_context_pressure(prompt)
     
-    assistant_response = None
-    for attempt in range(2):
-        assistant_response = call_llm(prompt, max_tokens=512, temperature=0.7)
-        if assistant_response is None:
-            if attempt == 0:
-                violation_prompt = "Reply with spoken words only.\n\n" + prompt
-                assistant_response = call_llm(violation_prompt, max_tokens=512, temperature=0.7)
-            break
-        
-        is_valid, reason = validate_speech(assistant_response)
-        if is_valid:
-            break
-        elif attempt == 0:
-            violation_prompt = "Reply with spoken words only.\n\n" + prompt
-            assistant_response = call_llm(violation_prompt, max_tokens=512, temperature=0.7)
-        else:
-            assistant_response = None
-    
-    is_fallback = False
-    if assistant_response is None:
-        assistant_response = "I'm having trouble generating a response right now. Please try again."
-        is_fallback = True
+    def _get_response(p: str) -> Optional[str]:
+        resp = call_llm(p, max_tokens=512, temperature=0.7)
+        if resp and validate_speech(resp)[0]:
+            return resp
+        return None
+
+    strict_prompt = "Reply with spoken words only — no asterisks, no actions, no parentheses.\n\n" + prompt
+    assistant_response = _get_response(prompt) or _get_response(strict_prompt)
+    is_fallback = assistant_response is None
+    if is_fallback:
+        assistant_response = "I'm having trouble right now. Give me a moment."
     
     save_message("assistant", assistant_response)
     
@@ -149,7 +139,10 @@ async def chat_endpoint(request: ChatRequest):
     
     audio_path = None
     audio_task = asyncio.to_thread(generate_speech, assistant_response)
-    audio_path = await audio_task
+    try:
+        audio_path = await asyncio.wait_for(audio_task, timeout=25.0)
+    except asyncio.TimeoutError:
+        audio_path = None
     
     audio_url = None
     if audio_path:
@@ -240,7 +233,7 @@ async def health_check():
 @app.get("/context")
 async def get_context():
     memories_str = format_for_prompt()
-    recent_messages = get_messages(n=5)
+    recent_messages = get_messages(n=20)
     prompt = build_prompt(
         system=system_prompt,
         memories=memories_str,
