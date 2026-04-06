@@ -537,6 +537,131 @@
       max-width: 320px;
     }
 
+    /* ── Toasts ─────────────────────────────────────── */
+    .toast-container {
+      position: fixed;
+      bottom: 80px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 200;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      pointer-events: none;
+    }
+
+    .toast {
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      color: var(--text);
+      font-size: 13px;
+      padding: 8px 16px;
+      border-radius: 20px;
+      animation: toastIn 0.25s ease, toastOut 0.3s ease 2.2s forwards;
+      white-space: nowrap;
+    }
+
+    .toast.success { border-color: var(--green); color: var(--green); }
+    .toast.error { border-color: var(--red); color: var(--red); }
+
+    @keyframes toastIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes toastOut {
+      from { opacity: 1; }
+      to { opacity: 0; }
+    }
+
+    /* ── TTS spinner on audio btn ───────────────────── */
+    .audio-btn.generating {
+      color: var(--text-muted);
+      border-color: var(--border);
+      cursor: wait;
+    }
+
+    /* ── Memory flash highlight ─────────────────────── */
+    @keyframes memFlash {
+      0% { background: var(--surface-2); }
+      40% { background: rgba(34,197,94,0.15); }
+      100% { background: transparent; }
+    }
+    .memory-item.new {
+      animation: memFlash 1.2s ease forwards;
+    }
+
+    /* ── Char counter ───────────────────────────────── */
+    .char-counter {
+      font-size: 11px;
+      color: var(--text-muted);
+      text-align: right;
+      margin-top: 4px;
+      height: 14px;
+      transition: color 0.2s;
+    }
+    .char-counter.warn { color: var(--yellow); }
+    .char-counter.over { color: var(--red); }
+
+    /* ── Message copy button ────────────────────────── */
+    .copy-btn {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 11px;
+      margin-top: 4px;
+      opacity: 0;
+      transition: opacity 0.15s, color 0.15s;
+      font-family: inherit;
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+    }
+    .message:hover .copy-btn { opacity: 1; }
+    .copy-btn:hover { color: var(--text); }
+    .copy-btn.copied { color: var(--green); opacity: 1; }
+
+    /* ── Improved memory panel items ────────────────── */
+    .memory-item {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--surface-2);
+      gap: 8px;
+    }
+    .memory-item-text { flex: 1; min-width: 0; }
+    .memory-delete-btn {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      padding: 2px 4px;
+      border-radius: 4px;
+      font-size: 14px;
+      opacity: 0;
+      flex-shrink: 0;
+      transition: opacity 0.15s, color 0.15s;
+      line-height: 1;
+    }
+    #memList .memory-item:hover .memory-delete-btn { opacity: 1; }
+    .memory-delete-btn:hover { color: var(--red); }
+
+    /* ── Connection banner ──────────────────────────── */
+    .conn-banner {
+      background: var(--red);
+      color: white;
+      font-size: 12px;
+      text-align: center;
+      padding: 6px;
+      display: none;
+      flex-shrink: 0;
+    }
+    .conn-banner.visible { display: block; }
+
     /* ── Responsive ────────────────────────────────── */
     @media (max-width: 480px) {
       .app { max-width: 100%; }
@@ -549,6 +674,8 @@
 </head>
 <body>
   <div class="app">
+    <div class="toast-container" id="toastContainer"></div>
+    <div class="conn-banner" id="connBanner">⚠ Cannot reach llama.cpp server — responses will fail</div>
     <!-- Header -->
     <header>
       <div class="header-left">
@@ -591,6 +718,7 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
         </button>
       </div>
+      <div class="char-counter" id="charCounter"></div>
     </div>
   </div>
 
@@ -645,311 +773,423 @@
   </div>
 
   <script>
-    const $ = (s) => document.querySelector(s);
-    const chat = $('#chat');
-    const welcome = $('#welcome');
-    const input = $('#userInput');
-    const sendBtn = $('#sendBtn');
-    const contextFill = $('#contextFill');
-    const statusDot = $('#statusDot');
-    const logoName = $('#logoName');
-    const memCount = $('#memCount');
-    const overlay = $('#overlay');
-    const memPanel = $('#memPanel');
-    const personaPanel = $('#personaPanel');
-    const memList = $('#memList');
-    const personaArea = $('#personaArea');
-    const resetModal = $('#resetModal');
+const $ = (s) => document.querySelector(s);
+const chat = $('#chat');
+const welcome = $('#welcome');
+const input = $('#userInput');
+const sendBtn = $('#sendBtn');
+const contextFill = $('#contextFill');
+const statusDot = $('#statusDot');
+const logoName = $('#logoName');
+const memCount = $('#memCount');
+const overlay = $('#overlay');
+const memPanel = $('#memPanel');
+const personaPanel = $('#personaPanel');
+const memList = $('#memList');
+const personaArea = $('#personaArea');
+const resetModal = $('#resetModal');
+const toastContainer = $('#toastContainer');
+const charCounter = $('#charCounter');
+const connBanner = $('#connBanner');
 
-    let isSending = false;
-    let currentAudio = null;
+const MAX_CHARS = 2000;
+let isSending = false;
+let currentAudio = null;
+let previousMemoryKeys = new Set();
 
-    function timeStr(ts) {
-      return new Date(ts * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+// ── Toast ────────────────────────────────────────────
+function toast(msg, type = '') {
+  const el = document.createElement('div');
+  el.className = `toast${type ? ' ' + type : ''}`;
+  el.textContent = msg;
+  toastContainer.appendChild(el);
+  setTimeout(() => el.remove(), 2600);
+}
+
+// ── Utilities ─────────────────────────────────────────
+function timeStr(ts) {
+  return new Date(ts * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function hideWelcome() {
+  if (welcome) welcome.style.display = 'none';
+}
+
+function scrollToBottom() {
+  chat.scrollTop = chat.scrollHeight;
+}
+
+// ── Message rendering ─────────────────────────────────
+function addMessage(role, text, timestamp) {
+  hideWelcome();
+  const div = document.createElement('div');
+  div.className = `message ${role}`;
+
+  const bubble = document.createElement('div');
+  bubble.className = 'bubble';
+  bubble.textContent = text;
+  div.appendChild(bubble);
+
+  const meta = document.createElement('div');
+  meta.style.cssText = 'display:flex;align-items:center;gap:6px;';
+
+  if (timestamp) {
+    const time = document.createElement('div');
+    time.className = 'msg-time';
+    time.textContent = timeStr(timestamp);
+    meta.appendChild(time);
+  }
+
+  const copyBtn = document.createElement('button');
+  copyBtn.className = 'copy-btn';
+  copyBtn.innerHTML = `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Copy`;
+  copyBtn.onclick = () => {
+    navigator.clipboard.writeText(text).then(() => {
+      copyBtn.classList.add('copied');
+      copyBtn.textContent = '✓ Copied';
+      setTimeout(() => {
+        copyBtn.classList.remove('copied');
+        copyBtn.innerHTML = `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Copy`;
+      }, 1500);
+    });
+  };
+  meta.appendChild(copyBtn);
+  div.appendChild(meta);
+
+  chat.appendChild(div);
+  scrollToBottom();
+  return div;
+}
+
+function addAudioButton(msgEl, url) {
+  const btn = document.createElement('button');
+  btn.className = 'audio-btn';
+  btn.innerHTML = '▶ Replay';
+  btn.onclick = () => playAudio(url, btn);
+  msgEl.appendChild(btn);
+}
+
+function addGeneratingAudioButton(msgEl) {
+  const btn = document.createElement('button');
+  btn.className = 'audio-btn generating';
+  btn.innerHTML = '◌ Generating audio…';
+  btn.disabled = true;
+  msgEl.appendChild(btn);
+  return btn;
+}
+
+function playAudio(url, btn) {
+  if (currentAudio) { currentAudio.pause(); currentAudio = null; }
+  currentAudio = new Audio(url);
+  if (btn) {
+    btn.classList.add('playing');
+    btn.innerHTML = '⏸ Playing…';
+  }
+  currentAudio.onended = () => {
+    if (btn) {
+      btn.classList.remove('playing');
+      btn.innerHTML = '▶ Replay';
+    }
+    currentAudio = null;
+  };
+  currentAudio.onerror = () => {
+    if (btn) { btn.classList.remove('playing'); btn.innerHTML = '▶ Replay'; }
+    currentAudio = null;
+  };
+  currentAudio.play().catch(() => {});
+}
+
+function showTyping() {
+  hideWelcome();
+  const div = document.createElement('div');
+  div.className = 'typing';
+  div.id = 'typingIndicator';
+  div.innerHTML = '<span></span><span></span><span></span>';
+  chat.appendChild(div);
+  scrollToBottom();
+}
+
+function hideTyping() {
+  const el = document.getElementById('typingIndicator');
+  if (el) el.remove();
+}
+
+// ── Panels ─────────────────────────────────────────────
+function openPanel(panel) {
+  overlay.classList.add('open');
+  panel.classList.add('open');
+}
+
+function closePanels() {
+  overlay.classList.remove('open');
+  memPanel.classList.remove('open');
+  personaPanel.classList.remove('open');
+}
+
+overlay.addEventListener('click', closePanels);
+
+// ── Memory panel ────────────────────────────────────────
+async function fetchMemories(highlightNew = false) {
+  try {
+    const r = await fetch('/memories');
+    if (!r.ok) return {};
+    const data = await r.json();
+    const entries = Object.entries(data);
+    const currentKeys = new Set(entries.map(([k]) => k));
+    memCount.textContent = entries.length || '';
+
+    if (entries.length === 0) {
+      memList.innerHTML = '<div class="empty-state">No memories yet.<br><small>Facts you share will appear here.</small></div>';
+      previousMemoryKeys = currentKeys;
+      return data;
     }
 
-    function hideWelcome() {
-      if (welcome) welcome.style.display = 'none';
+    memList.innerHTML = entries.map(([k, v]) => {
+      const isNew = highlightNew && !previousMemoryKeys.has(k);
+      return `<div class="memory-item${isNew ? ' new' : ''}">
+        <div class="memory-item-text">
+          <div class="memory-key">${k.replace(/_/g, ' ')}</div>
+          <div class="memory-value">${v}</div>
+        </div>
+        <button class="memory-delete-btn" onclick="deleteMemory('${k}')" title="Delete">×</button>
+      </div>`;
+    }).join('');
+
+    const newKeys = highlightNew ? [...currentKeys].filter(k => !previousMemoryKeys.has(k)) : [];
+    if (newKeys.length > 0) {
+      toast(`Remembered ${newKeys.length} new fact${newKeys.length > 1 ? 's' : ''}`, 'success');
     }
 
-    function scrollToBottom() {
-      chat.scrollTop = chat.scrollHeight;
-    }
+    previousMemoryKeys = currentKeys;
+    return data;
+  } catch { return {}; }
+}
 
-    function addMessage(role, text, timestamp) {
-      hideWelcome();
-      const div = document.createElement('div');
-      div.className = `message ${role}`;
+async function deleteMemory(key) {
+  try {
+    const memories = await (await fetch('/memories')).json();
+    delete memories[key];
+    await fetch('/memories', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ memories })
+    });
+    await fetchMemories();
+    toast('Memory deleted');
+  } catch {
+    toast('Failed to delete memory', 'error');
+  }
+}
 
-      const bubble = document.createElement('div');
-      bubble.className = 'bubble';
-      bubble.textContent = text;
-      div.appendChild(bubble);
+async function fetchContext() {
+  try {
+    const r = await fetch('/context');
+    if (!r.ok) return;
+    const d = await r.json();
+    const pct = Math.min(100, d.pct || 0);
+    contextFill.style.width = pct + '%';
+    contextFill.style.background = d.level === 'high' ? 'var(--red)' : d.level === 'medium' ? 'var(--yellow)' : 'var(--green)';
+    contextFill.title = `Context: ${Math.round(pct)}% used`;
+  } catch {}
+}
 
-      if (timestamp) {
-        const time = document.createElement('div');
-        time.className = 'msg-time';
-        time.textContent = timeStr(timestamp);
-        div.appendChild(time);
-      }
+async function fetchPersona() {
+  try {
+    const r = await fetch('/persona');
+    if (!r.ok) return;
+    const d = await r.json();
+    personaArea.value = JSON.stringify(d, null, 2);
+    logoName.textContent = d.name || 'Chris';
+  } catch {}
+}
 
-      chat.appendChild(div);
-      scrollToBottom();
-      return div;
-    }
+async function fetchHealth() {
+  try {
+    const r = await fetch('/health');
+    if (!r.ok) return;
+    const d = await r.json();
+    const offline = !d.llama_reachable;
+    statusDot.classList.toggle('offline', offline);
+    connBanner.classList.toggle('visible', offline);
+  } catch {}
+}
 
-    function addAudioButton(msgEl, url) {
-      const btn = document.createElement('button');
-      btn.className = 'audio-btn';
-      btn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg> Replay';
-      btn.onclick = () => {
-        if (currentAudio) { currentAudio.pause(); currentAudio = null; }
-        currentAudio = new Audio(url);
-        btn.classList.add('playing');
-        btn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg> Playing...';
-        currentAudio.onended = () => {
-          btn.classList.remove('playing');
-          btn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg> Replay';
-          currentAudio = null;
-        };
-        currentAudio.play();
-      };
-      msgEl.appendChild(btn);
-    }
+// ── Send ────────────────────────────────────────────────
+async function send() {
+  const text = input.value.trim();
+  if (!text || isSending) return;
+  if (text.length > MAX_CHARS) {
+    toast('Message too long', 'error');
+    return;
+  }
 
-    function playAudio(url, btn) {
-      if (currentAudio) { currentAudio.pause(); }
-      currentAudio = new Audio(url);
-      if (btn) {
-        btn.classList.add('playing');
-        btn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg> Playing...';
-      }
-      currentAudio.onended = () => {
-        if (btn) {
-          btn.classList.remove('playing');
-          btn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg> Replay';
-        }
-        currentAudio = null;
-      };
-      currentAudio.play();
-    }
+  isSending = true;
+  sendBtn.disabled = true;
+  input.value = '';
+  updateCharCounter();
+  autoResize();
 
-    function showTyping() {
-      hideWelcome();
-      const div = document.createElement('div');
-      div.className = 'typing';
-      div.id = 'typingIndicator';
-      div.innerHTML = '<span></span><span></span><span></span>';
-      chat.appendChild(div);
-      scrollToBottom();
-    }
+  addMessage('user', text, Date.now() / 1000);
+  showTyping();
 
-    function hideTyping() {
-      const el = document.getElementById('typingIndicator');
-      if (el) el.remove();
-    }
+  try {
+    const r = await fetch('/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: text })
+    });
 
-    function openPanel(panel) {
-      overlay.classList.add('open');
-      panel.classList.add('open');
-    }
+    hideTyping();
 
-    function closePanels() {
-      overlay.classList.remove('open');
-      memPanel.classList.remove('open');
-      personaPanel.classList.remove('open');
-    }
-
-    overlay.addEventListener('click', closePanels);
-
-    async function fetchMemories() {
-      try {
-        const r = await fetch('/memories');
-        if (!r.ok) return {};
-        const data = await r.json();
-        const entries = Object.entries(data);
-        memCount.textContent = entries.length || '';
-
-        if (entries.length === 0) {
-          memList.innerHTML = '<div class="empty-state">No memories yet</div>';
-          return data;
-        }
-
-        memList.innerHTML = entries.map(([k, v]) =>
-          `<div class="memory-item"><div class="memory-key">${k}</div><div class="memory-value">${v}</div></div>`
-        ).join('');
-        return data;
-      } catch { return {}; }
-    }
-
-    async function fetchContext() {
-      try {
-        const r = await fetch('/context');
-        if (!r.ok) return;
-        const d = await r.json();
-        const pct = Math.min(100, d.pct || 0);
-        contextFill.style.width = pct + '%';
-        contextFill.style.background = d.level === 'high' ? 'var(--red)' : d.level === 'medium' ? 'var(--yellow)' : 'var(--green)';
-      } catch {}
-    }
-
-    async function fetchPersona() {
-      try {
-        const r = await fetch('/persona');
-        if (!r.ok) return;
-        const d = await r.json();
-        personaArea.value = JSON.stringify(d, null, 2);
-        logoName.textContent = d.name || 'Chris';
-      } catch {}
-    }
-
-    async function fetchHealth() {
-      try {
-        const r = await fetch('/health');
-        if (!r.ok) return;
-        const d = await r.json();
-        statusDot.classList.toggle('offline', !d.llama_reachable);
-      } catch {}
-    }
-
-    async function send() {
-      const text = input.value.trim();
-      if (!text || isSending) return;
-
-      isSending = true;
-      sendBtn.disabled = true;
-      input.value = '';
-      autoResize();
-
-      addMessage('user', text, Date.now() / 1000);
-      showTyping();
-
-      try {
-        const r = await fetch('/chat', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: text })
-        });
-
-        hideTyping();
-
-        if (!r.ok) {
-          addMessage('bot', 'Something went wrong. Try again.', Date.now() / 1000);
-          return;
-        }
-
-        const data = await r.json();
-        const msgEl = addMessage('bot', data.text, Date.now() / 1000);
-
-        if (data.audio_url) {
-          addAudioButton(msgEl, data.audio_url);
-          playAudio(data.audio_url, msgEl.querySelector('.audio-btn'));
-        }
-
-        await Promise.all([fetchMemories(), fetchContext()]);
-      } catch {
-        hideTyping();
-        addMessage('bot', 'Connection error. Is the server running?', Date.now() / 1000);
-      }
-
+    if (!r.ok) {
+      addMessage('bot', 'Something went wrong. Try again.', Date.now() / 1000);
       isSending = false;
-      sendBtn.disabled = !input.value.trim();
+      sendBtn.disabled = false;
       input.focus();
+      return;
     }
 
-    function autoResize() {
-      input.style.height = 'auto';
-      input.style.height = Math.min(input.scrollHeight, 120) + 'px';
+    const data = await r.json();
+    const msgEl = addMessage('bot', data.text, Date.now() / 1000);
+
+    if (data.audio_url) {
+      addAudioButton(msgEl, data.audio_url);
+      playAudio(data.audio_url, msgEl.querySelector('.audio-btn'));
     }
 
-    input.addEventListener('input', () => {
-      autoResize();
-      sendBtn.disabled = !input.value.trim();
+    // Refresh memories and highlight any new ones
+    await Promise.all([fetchMemories(true), fetchContext()]);
+  } catch {
+    hideTyping();
+    addMessage('bot', 'Connection error. Is the server running?', Date.now() / 1000);
+    toast('Connection error', 'error');
+  }
+
+  isSending = false;
+  sendBtn.disabled = !input.value.trim();
+  input.focus();
+}
+
+// ── Input handling ──────────────────────────────────────
+function updateCharCounter() {
+  const len = input.value.length;
+  if (len === 0) {
+    charCounter.textContent = '';
+    charCounter.className = 'char-counter';
+    return;
+  }
+  const remaining = MAX_CHARS - len;
+  if (remaining > 200) {
+    charCounter.textContent = '';
+    charCounter.className = 'char-counter';
+  } else {
+    charCounter.textContent = `${remaining} remaining`;
+    charCounter.className = `char-counter${remaining < 50 ? ' over' : remaining < 100 ? ' warn' : ''}`;
+  }
+}
+
+function autoResize() {
+  input.style.height = 'auto';
+  input.style.height = Math.min(input.scrollHeight, 120) + 'px';
+}
+
+input.addEventListener('input', () => {
+  autoResize();
+  updateCharCounter();
+  sendBtn.disabled = !input.value.trim() || isSending;
+});
+
+input.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    send();
+  }
+});
+
+sendBtn.addEventListener('click', send);
+
+// ── Button wiring ───────────────────────────────────────
+$('#memBtn').addEventListener('click', async () => {
+  await fetchMemories();
+  openPanel(memPanel);
+});
+$('#memClose').addEventListener('click', closePanels);
+
+$('#personaBtn').addEventListener('click', async () => {
+  await fetchPersona();
+  openPanel(personaPanel);
+});
+$('#personaClose').addEventListener('click', closePanels);
+
+$('#savePersonaBtn').addEventListener('click', async () => {
+  try {
+    const obj = JSON.parse(personaArea.value);
+    const r = await fetch('/persona', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ persona: obj })
     });
+    if (r.ok) {
+      logoName.textContent = obj.name || 'Chris';
+      closePanels();
+      toast('Persona saved', 'success');
+    }
+  } catch {
+    toast('Invalid JSON — check the format', 'error');
+  }
+});
 
-    input.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && !e.shiftKey) {
-        e.preventDefault();
-        send();
-      }
-    });
+$('#clearMemBtn').addEventListener('click', async () => {
+  if (!confirm('Clear all memories?')) return;
+  await fetch('/memories', { method: 'DELETE' });
+  previousMemoryKeys = new Set();
+  await fetchMemories();
+  toast('Memories cleared');
+});
 
-    sendBtn.addEventListener('click', send);
+$('#exportBtn').addEventListener('click', async () => {
+  const r = await fetch('/export');
+  if (!r.ok) { toast('Export failed', 'error'); return; }
+  const blob = await r.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'conversation.txt';
+  document.body.appendChild(a); a.click();
+  a.remove(); URL.revokeObjectURL(url);
+  toast('Conversation exported');
+});
 
-    $('#memBtn').addEventListener('click', async () => {
-      await fetchMemories();
-      openPanel(memPanel);
-    });
+$('#resetBtn').addEventListener('click', () => resetModal.classList.add('open'));
+$('#modalCancel').addEventListener('click', () => resetModal.classList.remove('open'));
 
-    $('#memClose').addEventListener('click', closePanels);
+$('#modalResetChat').addEventListener('click', async () => {
+  await fetch('/reset', { method: 'DELETE' });
+  resetModal.classList.remove('open');
+  chat.innerHTML = '';
+  chat.appendChild(welcome);
+  welcome.style.display = '';
+  await fetchContext();
+  toast('Chat reset');
+});
 
-    $('#personaBtn').addEventListener('click', async () => {
-      await fetchPersona();
-      openPanel(personaPanel);
-    });
+$('#modalResetAll').addEventListener('click', async () => {
+  await fetch('/reset', { method: 'DELETE' });
+  await fetch('/memories', { method: 'DELETE' });
+  previousMemoryKeys = new Set();
+  resetModal.classList.remove('open');
+  chat.innerHTML = '';
+  chat.appendChild(welcome);
+  welcome.style.display = '';
+  await Promise.all([fetchMemories(), fetchContext()]);
+  toast('Chat and memories reset');
+});
 
-    $('#personaClose').addEventListener('click', closePanels);
-
-    $('#savePersonaBtn').addEventListener('click', async () => {
-      try {
-        const obj = JSON.parse(personaArea.value);
-        const r = await fetch('/persona', {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ persona: obj })
-        });
-        if (r.ok) {
-          logoName.textContent = obj.name || 'Chris';
-          closePanels();
-        }
-      } catch {
-        alert('Invalid JSON');
-      }
-    });
-
-    $('#clearMemBtn').addEventListener('click', async () => {
-      await fetch('/memories', { method: 'DELETE' });
-      await fetchMemories();
-    });
-
-    $('#exportBtn').addEventListener('click', async () => {
-      const r = await fetch('/export');
-      if (!r.ok) return;
-      const blob = await r.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url; a.download = 'conversation.txt';
-      document.body.appendChild(a); a.click();
-      a.remove(); URL.revokeObjectURL(url);
-    });
-
-    $('#resetBtn').addEventListener('click', () => resetModal.classList.add('open'));
-    $('#modalCancel').addEventListener('click', () => resetModal.classList.remove('open'));
-
-    $('#modalResetChat').addEventListener('click', async () => {
-      await fetch('/reset', { method: 'DELETE' });
-      resetModal.classList.remove('open');
-      chat.innerHTML = '';
-      chat.appendChild(welcome);
-      welcome.style.display = '';
-      await fetchContext();
-    });
-
-    $('#modalResetAll').addEventListener('click', async () => {
-      await fetch('/reset', { method: 'DELETE' });
-      await fetch('/memories', { method: 'DELETE' });
-      resetModal.classList.remove('open');
-      chat.innerHTML = '';
-      chat.appendChild(welcome);
-      welcome.style.display = '';
-      await Promise.all([fetchMemories(), fetchContext()]);
-    });
-
-    (async () => {
-      await Promise.all([fetchMemories(), fetchContext(), fetchPersona(), fetchHealth()]);
-      setInterval(fetchContext, 15000);
-      setInterval(fetchHealth, 30000);
-    })();
+// ── Init ────────────────────────────────────────────────
+(async () => {
+  await Promise.all([fetchMemories(), fetchContext(), fetchPersona(), fetchHealth()]);
+  setInterval(fetchContext, 15000);
+  setInterval(fetchHealth, 30000);
+})();
   </script>
 </body>
 </html>

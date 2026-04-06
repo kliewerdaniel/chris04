@@ -51,6 +51,7 @@ async def lifespan(app: FastAPI):
     except Exception:
         pass
     
+    Path("audio_outputs").mkdir(exist_ok=True)
     print("=== Chris Voice Companion Started ===")
     print(f"Personality: {persona.get('name', 'Chris')}")
     print(f"Memories: {len(memories)}")
@@ -134,8 +135,14 @@ async def chat_endpoint(request: ChatRequest):
     
     save_message("assistant", assistant_response)
     
+    async def _run_extraction(user_message: str, assistant_response: str):
+        try:
+            await asyncio.to_thread(extract_and_save, user_message, assistant_response)
+        except Exception as e:
+            print(f"[MEMORY] Background extraction task failed: {e}")
+
     if not is_fallback:
-        asyncio.create_task(asyncio.to_thread(extract_and_save, user_message, assistant_response))
+        asyncio.create_task(_run_extraction(user_message, assistant_response))
     
     audio_path = None
     audio_task = asyncio.to_thread(generate_speech, assistant_response)
@@ -242,6 +249,20 @@ async def get_context():
         user_message="test"
     )
     return JSONResponse(get_context_pressure(prompt))
+
+@app.get("/debug/memories")
+async def debug_memories():
+    from memory import load_memories, MEMORIES_FILE
+    memories = load_memories()
+    file_exists = MEMORIES_FILE.exists()
+    file_size = MEMORIES_FILE.stat().st_size if file_exists else 0
+    return JSONResponse({
+        "file_exists": file_exists,
+        "file_path": str(MEMORIES_FILE.absolute()),
+        "file_size_bytes": file_size,
+        "memory_count": len(memories),
+        "memories": memories
+    })
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
