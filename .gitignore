@@ -1,0 +1,6 @@
+*.mp3
+*.wav
+*.db
+/venv/
+/__pycache__/
+*.json
