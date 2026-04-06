@@ -1049,6 +1049,8 @@ const connBanner = $('#connBanner');
 const MAX_CHARS = 2000;
 let isSending = false;
 let currentAudio = null;
+let audioQueue = [];
+let audioIsPlaying = false;
 let previousMemoryKeys = new Set();
 let autoModeEnabled = false;
 let autoPollInterval = null;
@@ -1140,26 +1142,61 @@ function getPlaybackRate() {
   return slider ? parseFloat(slider.value) : 1.0;
 }
 
-function playAudio(url, btn) {
-  if (currentAudio) { currentAudio.pause(); currentAudio = null; }
+function enqueueAudio(url, btn) {
+  audioQueue.push({ url, btn });
+  drainAudioQueue();
+}
+
+function drainAudioQueue() {
+  if (audioIsPlaying || audioQueue.length === 0) return;
+
+  const { url, btn } = audioQueue.shift();
+  audioIsPlaying = true;
   currentAudio = new Audio(url);
   currentAudio.playbackRate = getPlaybackRate();
+
   if (btn) {
     btn.classList.add('playing');
     btn.innerHTML = '⏸ Playing…';
   }
+
   currentAudio.onended = () => {
     if (btn) {
       btn.classList.remove('playing');
       btn.innerHTML = '▶ Replay';
     }
     currentAudio = null;
+    audioIsPlaying = false;
+    drainAudioQueue();
   };
+
   currentAudio.onerror = () => {
-    if (btn) { btn.classList.remove('playing'); btn.innerHTML = '▶ Replay'; }
+    if (btn) {
+      btn.classList.remove('playing');
+      btn.innerHTML = '▶ Replay';
+    }
     currentAudio = null;
+    audioIsPlaying = false;
+    drainAudioQueue();
   };
-  currentAudio.play().catch(() => {});
+
+  currentAudio.play().catch(() => {
+    audioIsPlaying = false;
+    drainAudioQueue();
+  });
+}
+
+function playAudio(url, btn) {
+  enqueueAudio(url, btn);
+}
+
+function clearAudioQueue() {
+  audioQueue = [];
+  if (currentAudio) {
+    currentAudio.pause();
+    currentAudio = null;
+  }
+  audioIsPlaying = false;
 }
 
 function showTyping() {
@@ -1348,6 +1385,7 @@ function startAutoMode() {
 }
 
 function stopAutoMode() {
+  clearAudioQueue();
   autoModeEnabled = false;
   if (autoPollInterval) { clearInterval(autoPollInterval); autoPollInterval = null; }
   autoIsGenerating = false;
@@ -1551,6 +1589,7 @@ $('#modalCancel').addEventListener('click', () => resetModal.classList.remove('o
 $('#autoBtn').addEventListener('click', toggleAutoMode);
 
 $('#modalResetChat').addEventListener('click', async () => {
+  clearAudioQueue();
   await fetch('/reset', { method: 'DELETE' });
   resetModal.classList.remove('open');
   chat.innerHTML = '';
@@ -1561,6 +1600,7 @@ $('#modalResetChat').addEventListener('click', async () => {
 });
 
 $('#modalResetAll').addEventListener('click', async () => {
+  clearAudioQueue();
   await fetch('/reset', { method: 'DELETE' });
   await fetch('/memories', { method: 'DELETE' });
   previousMemoryKeys = new Set();
