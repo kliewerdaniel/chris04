@@ -8,12 +8,62 @@ from typing import Dict, List, Optional
 MEMORIES_FILE = Path("memories.json")
 
 ALLOWED_MEMORY_KEYS = {
-    'NAME', 'AGE', 'JOB', 'OCCUPATION', 'CITY', 'LOCATION', 'COUNTRY',
-    'HOBBY', 'HOBBIES', 'PET', 'PETS', 'PARTNER', 'SPOUSE', 'KIDS',
-    'CHILDREN', 'SIBLING', 'SIBLINGS', 'FRIEND', 'FAMILY',
-    'FOOD', 'MUSIC', 'SPORT', 'LANGUAGE', 'SCHOOL', 'UNIVERSITY',
-    'COMPANY', 'INDUSTRY', 'GOAL', 'FEAR', 'DREAM', 'VALUE',
-    'HEALTH', 'DIET', 'SLEEP', 'EXERCISE', 'MOOD', 'LAST_SEEN'
+    # Identity
+    'NAME', 'NICKNAME', 'AGE', 'BIRTHDAY', 'GENDER', 'PRONOUNS', 'NATIONALITY', 'ETHNICITY',
+
+    # Location
+    'CITY', 'TOWN', 'NEIGHBORHOOD', 'STATE', 'COUNTRY', 'LOCATION', 'HOMETOWN', 'TIMEZONE',
+
+    # Work & Education
+    'JOB', 'OCCUPATION', 'PROFESSION', 'ROLE', 'COMPANY', 'EMPLOYER', 'INDUSTRY', 'FIELD',
+    'SCHOOL', 'UNIVERSITY', 'COLLEGE', 'DEGREE', 'MAJOR', 'GRADUATION_YEAR',
+    'CAREER_GOAL', 'WORK_STYLE', 'WORK_HOURS', 'REMOTE', 'COWORKER', 'BOSS',
+
+    # Relationships & Family
+    'PARTNER', 'SPOUSE', 'BOYFRIEND', 'GIRLFRIEND', 'RELATIONSHIP_STATUS',
+    'KIDS', 'CHILDREN', 'CHILD_NAME', 'CHILD_AGE',
+    'PARENT', 'MOM', 'DAD', 'SIBLING', 'SIBLINGS', 'BROTHER', 'SISTER',
+    'GRANDPARENT', 'FRIEND', 'BEST_FRIEND', 'FAMILY', 'LIVING_WITH',
+
+    # Pets
+    'PET', 'PETS', 'DOG', 'CAT', 'PET_NAME', 'PET_BREED',
+
+    # Interests & Hobbies
+    'HOBBY', 'HOBBIES', 'INTEREST', 'INTERESTS', 'PASSION', 'PASTIME',
+    'SPORT', 'SPORTS_TEAM', 'EXERCISE', 'FITNESS', 'WORKOUT',
+    'MUSIC', 'MUSIC_GENRE', 'FAVORITE_BAND', 'FAVORITE_ARTIST', 'INSTRUMENT',
+    'BOOK', 'FAVORITE_BOOK', 'FAVORITE_AUTHOR', 'GENRE',
+    'MOVIE', 'FAVORITE_MOVIE', 'FAVORITE_SHOW', 'TV_SHOW',
+    'GAME', 'VIDEO_GAME', 'BOARD_GAME',
+    'TRAVEL', 'FAVORITE_PLACE', 'BUCKET_LIST', 'VISITED',
+    'CREATIVE', 'ART', 'WRITING', 'PHOTOGRAPHY', 'COOKING', 'CRAFTS',
+    'COLLECTION', 'VOLUNTEERING', 'CAUSE',
+
+    # Food & Drink
+    'FOOD', 'FAVORITE_FOOD', 'CUISINE', 'DIETARY', 'DIET', 'ALLERGY', 'VEGETARIAN',
+    'VEGAN', 'DRINK', 'COFFEE', 'ALCOHOL',
+
+    # Personality & Values
+    'PERSONALITY', 'VALUE', 'VALUES', 'BELIEF', 'RELIGION', 'POLITICS',
+    'STRENGTH', 'WEAKNESS', 'FEAR', 'DREAM', 'GOAL', 'AMBITION',
+    'LOVE_LANGUAGE', 'COMMUNICATION_STYLE', 'INTROVERT', 'EXTROVERT',
+
+    # Health & Wellbeing
+    'HEALTH', 'CONDITION', 'MEDICATION', 'THERAPY', 'MENTAL_HEALTH',
+    'SLEEP', 'SLEEP_SCHEDULE', 'ENERGY', 'STRESS', 'MOOD', 'EMOTION',
+
+    # Life circumstances
+    'LIVING_SITUATION', 'HOME', 'RENT', 'OWN', 'ROOMMATE',
+    'INCOME', 'FINANCIAL_GOAL', 'DEBT', 'SAVINGS',
+    'CAR', 'TRANSPORT', 'COMMUTE',
+    'LANGUAGE', 'LANGUAGES_SPOKEN',
+
+    # Current context
+    'CURRENT_PROJECT', 'CURRENT_CHALLENGE', 'CURRENT_GOAL', 'RECENT_EVENT',
+    'UPCOMING_EVENT', 'ANNIVERSARY', 'WEDDING', 'MOVING', 'NEW_JOB',
+
+    # Meta
+    'LAST_SEEN', 'FIRST_CONVERSATION', 'NOTE',
 }
 
 
@@ -226,7 +276,7 @@ def extract_and_save(user_msg: str, assistant_msg: str, debug_out: dict = None):
         "Extract ONLY facts the user explicitly stated in the message below.\n"
         "Do NOT invent, infer, or guess any facts.\n"
         "Do NOT include facts from the assistant's message.\n"
-        "Format: one KEY: value per line. Keys from: NAME AGE JOB CITY HOBBY PET PARTNER KIDS SCHOOL COMPANY\n"
+        "Format: one KEY: value per line. Use concise ALL_CAPS keys like NAME, AGE, JOB, CITY, HOBBY, PET, PARTNER, KIDS, SCHOOL, COMPANY, MOOD, FEAR, GOAL, HEALTH, FOOD, MUSIC, SPORT, BOOK, MOVIE, GAME, TRAVEL, DREAM, RELIGION, SLEEP, DIET, LANGUAGE, NICKNAME, BIRTHDAY, HOMETOWN\n"
         "Values must be 1-5 words only. No sentences. No punctuation.\n"
         "If the user stated no personal facts, write: NONE\n\n"
         "WRONG example (invented facts):\n"
