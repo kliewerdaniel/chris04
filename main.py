@@ -22,6 +22,7 @@ persona = {}
 cached_summary = None
 turn_counter = 0
 system_prompt = ""
+last_extraction_debug = {}
 
 # Pydantic models
 class ChatRequest(BaseModel):
@@ -136,10 +137,13 @@ async def chat_endpoint(request: ChatRequest):
     save_message("assistant", assistant_response)
     
     async def _run_extraction(user_message: str, assistant_response: str):
+        global last_extraction_debug
+        last_extraction_debug = {}
         try:
-            await asyncio.to_thread(extract_and_save, user_message, assistant_response)
+            await asyncio.to_thread(extract_and_save, user_message, assistant_response, last_extraction_debug)
         except Exception as e:
             print(f"[MEMORY] Background extraction task failed: {e}")
+            last_extraction_debug['error'] = str(e)
 
     if not is_fallback:
         asyncio.create_task(_run_extraction(user_message, assistant_response))
@@ -263,6 +267,10 @@ async def debug_memories():
         "memory_count": len(memories),
         "memories": memories
     })
+
+@app.get("/debug/last-extraction")
+async def debug_last_extraction():
+    return JSONResponse(last_extraction_debug)
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)

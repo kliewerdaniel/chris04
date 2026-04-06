@@ -7,6 +7,15 @@ from typing import Dict, List, Optional
 
 MEMORIES_FILE = Path("memories.json")
 
+ALLOWED_MEMORY_KEYS = {
+    'NAME', 'AGE', 'JOB', 'OCCUPATION', 'CITY', 'LOCATION', 'COUNTRY',
+    'HOBBY', 'HOBBIES', 'PET', 'PETS', 'PARTNER', 'SPOUSE', 'KIDS',
+    'CHILDREN', 'SIBLING', 'SIBLINGS', 'FRIEND', 'FAMILY',
+    'FOOD', 'MUSIC', 'SPORT', 'LANGUAGE', 'SCHOOL', 'UNIVERSITY',
+    'COMPANY', 'INDUSTRY', 'GOAL', 'FEAR', 'DREAM', 'VALUE',
+    'HEALTH', 'DIET', 'SLEEP', 'EXERCISE', 'MOOD', 'LAST_SEEN'
+}
+
 
 def load_memories() -> Dict[str, str]:
     """Load memories from JSON file."""
@@ -38,6 +47,37 @@ def _normalize_key(key: str) -> str:
     key = key.strip().replace(' ', '_').replace('-', '_').upper()
     key = ''.join(c for c in key if c.isalnum() or c == '_')
     return key
+
+
+def _is_valid_memory_value(value: str) -> bool:
+    """Return False if value looks like a hallucinated sentence rather than a fact."""
+    v = value.strip()
+    
+    # Too short or too long
+    if len(v) < 1 or len(v) > 80:
+        return False
+    
+    # Contains sentence-like patterns
+    sentence_markers = [
+        r'\bI\b', r'\bmy\b', r'\bme\b', r'\bwe\b', r'\bour\b',
+        r'\byou\b', r'\byour\b', r'\bhe\b', r'\bshe\b', r'\bthey\b',
+        r'\bis a\b', r'\bare a\b', r'\bwas a\b',
+        r'\bActually\b', r'\bWell\b', r'\bSo\b', r'\bBut\b',
+    ]
+    import re as _re
+    for pattern in sentence_markers:
+        if _re.search(pattern, v, _re.IGNORECASE):
+            return False
+    
+    # Multiple commas suggest a sentence, not a value
+    if v.count(',') >= 2:
+        return False
+    
+    # Ends with period and is long (a sentence, not an abbreviation)
+    if v.endswith('.') and len(v) > 20:
+        return False
+    
+    return True
 
 
 def upsert_memory(key: str, value: str):
@@ -135,26 +175,46 @@ def _rule_based_extract(user_msg: str) -> Dict[str, str]:
         if 5 < age < 120:
             facts['AGE'] = str(age)
     
-    # Job/occupation: "I work as a X", "I'm a X", "I am a X"
-    job_m = re.search(r"i(?:'m| am) a(?:n)? ([\w\s]{3,30}?)(?:\.|,|$| and | but )", text)
-    if job_m:
-        job = job_m.group(1).strip()
-        # Filter out non-job words
-        skip = {'bit', 'lot', 'fan', 'huge', 'big', 'small', 'little', 'pretty', 'very', 'really', 'quite'}
-        if job and job not in skip and len(job) > 2:
-            facts['JOB'] = job
+    # Job/occupation: "I work as a X", "I'm a [job title]", "I am a [job title]"
+    # Only match if the captured group looks like a role (no filler words)
+    job_skip = {'bit', 'lot', 'fan', 'huge', 'big', 'small', 'little', 'pretty',
+                'very', 'really', 'quite', 'little', 'total', 'huge', 'good',
+                'bad', 'tired', 'busy', 'happy', 'sad', 'lucky', 'mess', 'wreck'}
+
+    work_m = re.search(r"i work(?:ed)? as an? ([\w\s]{3,30}?)(?:\.|,|$)", text)
+    if work_m:
+        job = work_m.group(1).strip()
+        if job and job.split()[0] not in job_skip:
+            facts['JOB'] = job.title()
+
+    if 'JOB' not in facts:
+        role_m = re.search(r"i(?:'m| am) an? ([\w]+(?:\s[\w]+)?)\b", text)
+        if role_m:
+            job = role_m.group(1).strip()
+            if (job not in job_skip and len(job) > 3
+                    and not any(c.isdigit() for c in job)):
+                facts['JOB'] = job.title()
     
-    # City/location: "I live in X", "I'm from X", "I'm in X"  
-    loc_m = re.search(r"(?:i live in|i'm from|from|i'm in|i am in) ([A-Z][a-zA-Z\s]{2,25}?)(?:\.|,|$)", user_msg)
-    if loc_m:
-        loc = loc_m.group(1).strip()
-        if len(loc) > 1:
-            facts['CITY'] = loc
+    # City/location: require stronger anchors
+    loc_patterns = [
+        r"i live in ([A-Z][a-zA-Z\s]{2,25}?)(?:\.|,|$)",
+        r"i(?:'m| am) from ([A-Z][a-zA-Z\s]{2,25}?)(?:\.|,|$)",
+        r"i(?:'m| am) based in ([A-Z][a-zA-Z\s]{2,25}?)(?:\.|,|$)",
+        r"i(?:'m| am) in ([A-Z][a-zA-Z\s]{2,25}?)(?:\.|,|$)",
+        r"i(?:'m| am) currently in ([A-Z][a-zA-Z\s]{2,25}?)(?:\.|,|$)",
+    ]
+    for pattern in loc_patterns:
+        loc_m = re.search(pattern, user_msg)
+        if loc_m:
+            loc = loc_m.group(1).strip()
+            if len(loc) > 1 and loc.lower() not in ('a', 'an', 'the', 'here', 'there'):
+                facts['CITY'] = loc
+            break
     
     return facts
 
 
-def extract_and_save(user_msg: str, assistant_msg: str):
+def extract_and_save(user_msg: str, assistant_msg: str, debug_out: dict = None):
     """Extract memories from conversation and save them."""
     from llm import call_llm
     import logging
@@ -163,20 +223,22 @@ def extract_and_save(user_msg: str, assistant_msg: str):
 
     extraction_prompt = (
         "<start_of_turn>user\n"
-        "Read this conversation and list any personal facts about the user.\n"
-        "Rules:\n"
-        "- Write one fact per line in the format KEY: value\n"
-        "- Keys must be short ALL_CAPS words like NAME, AGE, JOB, CITY, HOBBY, PET\n"
-        "- Only include facts the user stated directly\n"
-        "- If there are no facts, write only: NONE\n"
-        "- Do not write explanations, sentences, or anything except KEY: value lines\n\n"
-        "Examples of correct output:\n"
-        "NAME: Sarah\n"
-        "JOB: nurse\n"
-        "HOBBY: painting\n\n"
-        f"Conversation:\n"
-        f"User: {user_msg}\n"
-        f"Assistant: {assistant_msg}\n"
+        "Extract ONLY facts the user explicitly stated in the message below.\n"
+        "Do NOT invent, infer, or guess any facts.\n"
+        "Do NOT include facts from the assistant's message.\n"
+        "Format: one KEY: value per line. Keys from: NAME AGE JOB CITY HOBBY PET PARTNER KIDS SCHOOL COMPANY\n"
+        "Values must be 1-5 words only. No sentences. No punctuation.\n"
+        "If the user stated no personal facts, write: NONE\n\n"
+        "WRONG example (invented facts):\n"
+        "USER: my name is John and I am a developer\n"
+        "WRONG output: USER: my name is John and I am a developer\n"
+        "WRONG output: USER: John is a developer who likes coding\n\n"
+        "CORRECT example:\n"
+        "USER: my name is John and I am a developer\n"
+        "CORRECT output:\n"
+        "NAME: John\n"
+        "JOB: developer\n\n"
+        f"User message: {user_msg}\n"
         "<end_of_turn>\n"
         "<start_of_turn>model\n"
     )
@@ -187,6 +249,9 @@ def extract_and_save(user_msg: str, assistant_msg: str):
         print(f"[MEMORY] Rule-based: {k} = {v}")
         upsert_memory(k, v)
 
+    response = None
+    saved_count = 0
+
     try:
         response = call_llm(extraction_prompt, max_tokens=100, temperature=0.1)
         logger.debug(f"Memory extraction raw response: {repr(response)}")
@@ -194,6 +259,10 @@ def extract_and_save(user_msg: str, assistant_msg: str):
 
         if response is None:
             print("[MEMORY] LLM returned None, skipping extraction")
+            if debug_out is not None:
+                debug_out['rule_facts'] = rule_facts
+                debug_out['llm_raw'] = None
+                debug_out['saved'] = saved_count
             return
 
         response = response.strip()
@@ -201,9 +270,12 @@ def extract_and_save(user_msg: str, assistant_msg: str):
         # Reject if the entire response is a refusal/none indicator
         if response.upper() in ("NONE", "NO FACTS", "N/A", "", "NONE."):
             print("[MEMORY] No facts found in conversation")
+            if debug_out is not None:
+                debug_out['rule_facts'] = rule_facts
+                debug_out['llm_raw'] = response
+                debug_out['saved'] = saved_count
             return
 
-        saved_count = 0
         for line in response.split('\n'):
             line = line.strip()
             if not line:
@@ -226,6 +298,16 @@ def extract_and_save(user_msg: str, assistant_msg: str):
             if len(value) > 120:
                 print(f"[MEMORY] Skipping line with overlong value: {repr(line)}")
                 continue
+
+            normalized = _normalize_key(key)
+            if normalized not in ALLOWED_MEMORY_KEYS:
+                print(f"[MEMORY] Rejected key not in allowlist: {repr(normalized)}")
+                continue
+
+            if not _is_valid_memory_value(value):
+                print(f"[MEMORY] Rejected sentence-like value: {repr(value)}")
+                continue
+
             print(f"[MEMORY] Saving: {key} = {value}")
             upsert_memory(key, value)
             saved_count += 1
@@ -239,3 +321,8 @@ def extract_and_save(user_msg: str, assistant_msg: str):
     except Exception as e:
         print(f"[MEMORY] extract_and_save failed: {e}")
         logger.exception("Memory extraction error")
+
+    if debug_out is not None:
+        debug_out['rule_facts'] = rule_facts
+        debug_out['llm_raw'] = response
+        debug_out['saved'] = saved_count
