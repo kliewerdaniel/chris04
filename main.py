@@ -1,4 +1,5 @@
 import asyncio
+import random
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -23,6 +24,8 @@ cached_summary = None
 turn_counter = 0
 system_prompt = ""
 last_extraction_debug = {}
+auto_mode_enabled = False
+last_message_time = 0.0
 
 # Pydantic models
 class ChatRequest(BaseModel):
@@ -33,6 +36,9 @@ class MemoriesUpdate(BaseModel):
 
 class PersonaUpdate(BaseModel):
     persona: dict
+
+class AutoModeRequest(BaseModel):
+    enabled: bool
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -77,6 +83,8 @@ async def chat_endpoint(request: ChatRequest):
     global cached_summary, turn_counter, system_prompt, persona
     
     user_message = request.message.strip()
+    global last_message_time
+    last_message_time = time.time()
     if not user_message:
         raise HTTPException(status_code=400, detail="Empty message")
     
@@ -135,6 +143,7 @@ async def chat_endpoint(request: ChatRequest):
         assistant_response = "I'm having trouble right now. Give me a moment."
     
     save_message("assistant", assistant_response)
+    last_message_time = time.time()
     
     if not is_fallback:
         global last_extraction_debug
@@ -274,6 +283,105 @@ async def debug_memories():
 @app.get("/debug/last-extraction")
 async def debug_last_extraction():
     return JSONResponse(last_extraction_debug)
+
+@app.post("/auto-mode")
+async def set_auto_mode(request: AutoModeRequest):
+    global auto_mode_enabled, last_message_time
+    auto_mode_enabled = request.enabled
+    if request.enabled:
+        last_message_time = time.time()
+    print(f"[AUTO] Auto mode {'enabled' if request.enabled else 'disabled'}")
+    return JSONResponse({"enabled": auto_mode_enabled})
+
+@app.get("/auto-mode/poll")
+async def auto_mode_poll():
+    global last_message_time, cached_summary, system_prompt
+
+    if not auto_mode_enabled:
+        return JSONResponse({"message": None})
+
+    now = time.time()
+    silence_seconds = now - last_message_time
+
+    if silence_seconds < 12:
+        return JSONResponse({"message": None})
+
+    memories_str = format_for_prompt()
+    recent_messages = get_messages(n=10)
+
+    proactive_modes = [
+        "Ask the user a genuine curious question about their life, feelings, or day. One question only.",
+        "Share a brief observation, thought, or something on your mind. Keep it to 1-2 sentences.",
+        "Tell a short joke or funny observation. Keep it light.",
+        "Check in on how the user is feeling right now. One sentence.",
+        "Bring up something from earlier in the conversation or from your memories of them, naturally.",
+        "Share a short interesting thought or fact about something you've been thinking about.",
+        "Ask the user what they're up to right now.",
+    ]
+
+    chosen_mode = random.choice(proactive_modes)
+
+    if recent_messages:
+        last_content = recent_messages[-1].get("content", "")
+        if len(last_content) > 10:
+            chosen_mode = random.choice([
+                f"Continue naturally from the last thing discussed: '{last_content[:80]}'. React to it or build on it in one sentence.",
+                "Ask a follow-up question about what was just discussed. One sentence.",
+                chosen_mode,
+                chosen_mode,
+            ])
+
+    proactive_system = (
+        f"{system_prompt}\n\n"
+        f"IMPORTANT: {chosen_mode}\n"
+        "Do not wait for the user. Just speak."
+    )
+
+    prompt = build_prompt(
+        system=proactive_system,
+        memories=memories_str,
+        summary=cached_summary,
+        recent=recent_messages,
+        user_message="[continue the conversation naturally]"
+    )
+
+    def _generate():
+        from utils import validate_speech
+        resp = call_llm(prompt, max_tokens=120, temperature=0.85)
+        if resp and validate_speech(resp)[0]:
+            return resp
+        simple = build_prompt(
+            system=system_prompt,
+            memories="",
+            summary=None,
+            recent=[],
+            user_message="Say one friendly thing to start a conversation."
+        )
+        return call_llm(simple, max_tokens=80, temperature=0.9)
+
+    try:
+        message = await asyncio.wait_for(asyncio.to_thread(_generate), timeout=20.0)
+    except asyncio.TimeoutError:
+        message = None
+
+    if not message or not message.strip():
+        return JSONResponse({"message": None})
+
+    save_message("assistant", message)
+    last_message_time = time.time()
+
+    audio_url = None
+    try:
+        audio_path = await asyncio.wait_for(
+            asyncio.to_thread(generate_speech, message),
+            timeout=25.0
+        )
+        if audio_path:
+            audio_url = f"/audio/{Path(audio_path).name}"
+    except asyncio.TimeoutError:
+        pass
+
+    return JSONResponse({"message": message, "audio_url": audio_url})
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)

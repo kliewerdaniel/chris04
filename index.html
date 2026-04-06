@@ -117,6 +117,27 @@
       height: 18px;
     }
 
+    .icon-btn.auto-active {
+      color: var(--green);
+      background: rgba(34, 197, 94, 0.1);
+    }
+
+    .icon-btn.auto-active:hover {
+      background: rgba(34, 197, 94, 0.2);
+    }
+
+    .auto-badge {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--green);
+      animation: pulse 2s ease infinite;
+      pointer-events: none;
+    }
+
     /* ── Chat Area ─────────────────────────────────── */
     .chat {
       flex: 1;
@@ -852,6 +873,9 @@
         <button class="icon-btn" id="resetBtn" title="Reset">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
         </button>
+        <button class="icon-btn" id="autoBtn" title="Auto mode">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        </button>
       </div>
     </header>
 
@@ -962,6 +986,9 @@ const MAX_CHARS = 2000;
 let isSending = false;
 let currentAudio = null;
 let previousMemoryKeys = new Set();
+let autoModeEnabled = false;
+let autoPollInterval = null;
+let autoIsGenerating = false;
 
 // ── Toast ────────────────────────────────────────────
 function toast(msg, type = '') {
@@ -1219,6 +1246,59 @@ async function fetchHealth() {
   } catch {}
 }
 
+async function pollAutoMode() {
+  if (!autoModeEnabled || isSending || autoIsGenerating) return;
+
+  try {
+    autoIsGenerating = true;
+    const r = await fetch('/auto-mode/poll');
+    if (!r.ok) { autoIsGenerating = false; return; }
+    const data = await r.json();
+
+    if (data.message) {
+      const msgEl = addMessage('bot', data.message, Date.now() / 1000);
+      if (data.audio_url) {
+        addAudioButton(msgEl, data.audio_url);
+        playAudio(data.audio_url, msgEl.querySelector('.audio-btn'));
+      }
+      await fetchMemories(true);
+    }
+  } catch {
+    // silent — auto mode polling should never show errors
+  } finally {
+    autoIsGenerating = false;
+  }
+}
+
+function startAutoMode() {
+  autoModeEnabled = true;
+  autoPollInterval = setInterval(pollAutoMode, 4000);
+  document.getElementById('autoBtn').classList.add('auto-active');
+  toast('Auto mode on', 'success');
+}
+
+function stopAutoMode() {
+  autoModeEnabled = false;
+  if (autoPollInterval) { clearInterval(autoPollInterval); autoPollInterval = null; }
+  autoIsGenerating = false;
+  document.getElementById('autoBtn').classList.remove('auto-active');
+  toast('Auto mode off');
+}
+
+async function toggleAutoMode() {
+  const newState = !autoModeEnabled;
+  try {
+    await fetch('/auto-mode', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: newState })
+    });
+    if (newState) startAutoMode(); else stopAutoMode();
+  } catch {
+    toast('Failed to toggle auto mode', 'error');
+  }
+}
+
 // ── Send ────────────────────────────────────────────────
 async function send() {
   const text = input.value.trim();
@@ -1302,6 +1382,14 @@ input.addEventListener('input', () => {
   autoResize();
   updateCharCounter();
   sendBtn.disabled = !input.value.trim() || isSending;
+  if (autoPollInterval) {
+    clearInterval(autoPollInterval);
+    autoPollInterval = setTimeout(() => {
+      if (autoModeEnabled) {
+        autoPollInterval = setInterval(pollAutoMode, 4000);
+      }
+    }, 5000);
+  }
 });
 
 input.addEventListener('keydown', (e) => {
@@ -1390,6 +1478,7 @@ $('#exportBtn').addEventListener('click', async () => {
 
 $('#resetBtn').addEventListener('click', () => resetModal.classList.add('open'));
 $('#modalCancel').addEventListener('click', () => resetModal.classList.remove('open'));
+$('#autoBtn').addEventListener('click', toggleAutoMode);
 
 $('#modalResetChat').addEventListener('click', async () => {
   await fetch('/reset', { method: 'DELETE' });
