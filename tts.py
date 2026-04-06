@@ -79,12 +79,18 @@ def _make_silent_wav() -> Optional[str]:
         return None
 
 
-def _cleanup_old_files():
-    """Delete .wav files older than 1 hour."""
+def _cleanup_old_files(keep: int = 10):
+    """Delete all but the most recent `keep` wav files."""
     try:
-        cutoff = time.time() - 3600
-        for filepath in OUTPUT_DIR.glob("*.wav"):
-            if filepath.stat().st_mtime < cutoff:
-                filepath.unlink()
+        files = sorted(
+            OUTPUT_DIR.glob("*.wav"),
+            key=lambda f: f.stat().st_mtime,
+            reverse=True
+        )
+        for old_file in files[keep:]:
+            try:
+                old_file.unlink()
+            except Exception:
+                pass
     except Exception:
         pass
