@@ -800,6 +800,65 @@
       font-size: 12px;
     }
 
+    /* ── Speed dial ─────────────────────────────────── */
+    .speed-dial {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 0 4px;
+    }
+
+    .speed-dial label {
+      font-size: 11px;
+      color: var(--text-muted);
+      white-space: nowrap;
+      user-select: none;
+    }
+
+    .speed-slider {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 72px;
+      height: 3px;
+      border-radius: 2px;
+      background: var(--surface-2);
+      outline: none;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .speed-slider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 13px;
+      height: 13px;
+      border-radius: 50%;
+      background: var(--text);
+      cursor: pointer;
+      transition: transform 0.15s, background 0.15s;
+    }
+
+    .speed-slider::-webkit-slider-thumb:hover {
+      transform: scale(1.2);
+    }
+
+    .speed-slider::-moz-range-thumb {
+      width: 13px;
+      height: 13px;
+      border-radius: 50%;
+      background: var(--text);
+      border: none;
+      cursor: pointer;
+    }
+
+    .speed-value {
+      font-size: 11px;
+      color: var(--text-muted);
+      min-width: 22px;
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+
     /* ── Connection banner ──────────────────────────── */
     .conn-banner {
       background: var(--red);
@@ -860,6 +919,11 @@
         </div>
       </div>
       <div class="header-actions">
+        <div class="speed-dial">
+          <label for="speedSlider">speed</label>
+          <input type="range" class="speed-slider" id="speedSlider" min="0.5" max="2.5" step="0.05" value="1" />
+          <span class="speed-value" id="speedValue">1×</span>
+        </div>
         <button class="icon-btn" id="memBtn" title="Memories">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a7 7 0 0 1 7 7c0 3-2 5.5-3.5 7.5L12 22l-3.5-5.5C7 14.5 5 12 5 9a7 7 0 0 1 7-7z"/><circle cx="12" cy="9" r="2"/></svg>
           <span id="memCount" style="font-size:11px;margin-left:2px;"></span>
@@ -1071,9 +1135,15 @@ function addGeneratingAudioButton(msgEl) {
   return btn;
 }
 
+function getPlaybackRate() {
+  const slider = document.getElementById('speedSlider');
+  return slider ? parseFloat(slider.value) : 1.0;
+}
+
 function playAudio(url, btn) {
   if (currentAudio) { currentAudio.pause(); currentAudio = null; }
   currentAudio = new Audio(url);
+  currentAudio.playbackRate = getPlaybackRate();
   if (btn) {
     btn.classList.add('playing');
     btn.innerHTML = '⏸ Playing…';
@@ -1513,6 +1583,28 @@ chat.addEventListener('scroll', () => {
   await Promise.all([fetchMemories(), fetchContext(), fetchPersona(), fetchHealth()]);
   setInterval(fetchContext, 15000);
   setInterval(fetchHealth, 30000);
+
+  // ── Speed dial ────────────────────────────────────
+  const speedSlider = document.getElementById('speedSlider');
+  const speedValue = document.getElementById('speedValue');
+
+  speedSlider.addEventListener('input', () => {
+    const rate = parseFloat(speedSlider.value);
+    speedValue.textContent = rate.toFixed(2).replace(/\.?0+$/, '') + '×';
+    if (currentAudio) {
+      currentAudio.playbackRate = rate;
+    }
+  });
+
+  const savedSpeed = localStorage.getItem('playbackRate');
+  if (savedSpeed) {
+    speedSlider.value = savedSpeed;
+    speedSlider.dispatchEvent(new Event('input'));
+  }
+
+  speedSlider.addEventListener('change', () => {
+    localStorage.setItem('playbackRate', speedSlider.value);
+  });
 })();
   </script>
 </body>
