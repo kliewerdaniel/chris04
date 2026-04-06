@@ -303,7 +303,7 @@ async def auto_mode_poll():
     now = time.time()
     silence_seconds = now - last_message_time
 
-    if silence_seconds < 12:
+    if silence_seconds < 4:
         return JSONResponse({"message": None})
 
     memories_str = format_for_prompt()
