@@ -136,17 +136,20 @@ async def chat_endpoint(request: ChatRequest):
     
     save_message("assistant", assistant_response)
     
-    async def _run_extraction(user_message: str, assistant_response: str):
+    if not is_fallback:
         global last_extraction_debug
         last_extraction_debug = {}
         try:
-            await asyncio.to_thread(extract_and_save, user_message, assistant_response, last_extraction_debug)
+            await asyncio.wait_for(
+                asyncio.to_thread(extract_and_save, user_message, assistant_response, last_extraction_debug),
+                timeout=8.0
+            )
+        except asyncio.TimeoutError:
+            print("[MEMORY] Extraction timed out after 8s")
+            last_extraction_debug['error'] = 'timeout'
         except Exception as e:
-            print(f"[MEMORY] Background extraction task failed: {e}")
+            print(f"[MEMORY] Extraction failed: {e}")
             last_extraction_debug['error'] = str(e)
-
-    if not is_fallback:
-        asyncio.create_task(_run_extraction(user_message, assistant_response))
     
     audio_path = None
     audio_task = asyncio.to_thread(generate_speech, assistant_response)
